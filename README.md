@@ -14,3 +14,12 @@ This Laravel package provides access to Zimbabwe's Reserve Bank (RBZ) daily exch
 ```bash
 
  composer require smalot/pdfparser
+
+
+### Get USD Rate
+```bash
+curl https://your-api.com/api/rbz-usd-rate
+
+### Get All Currency Rates
+```bash
+curl https://your-api.com/api/rbz-all-rate
