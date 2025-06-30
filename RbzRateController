@@ -1,0 +1,158 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Smalot\PdfParser\Parser;
+use Carbon\Carbon;
+use Illuminate\Support\Str;
+
+class RbzRateController extends Controller
+{
+    public function fetchUsdRate()
+    {
+        $date = Carbon::now(); 
+        $day = strtoupper($date->format('d'));
+        $month = Str::ucfirst($date->format('F'));
+        $year = $date->format('Y');
+        $month_upper = strtoupper($date->format('F'));
+
+        $pdfUrl = "https://www.rbz.co.zw/documents/Exchange_Rates/{$year}/{$month}/RATES_{$day}_{$month_upper}_{$year}.pdf";
+
+        try {
+			
+  			$context = stream_context_create([
+  				"ssl" => [
+  					"verify_peer" => false,
+  					"verify_peer_name" => false,
+  				]
+  			]);
+
+			  $pdfContent = file_get_contents($pdfUrl, false, $context);
+
+            if (!$pdfContent) {
+                return response()->json(['error' => 'RBZ PDF not found'], 404);
+            }
+
+            $parser = new Parser();
+            $pdf = $parser->parseContent($pdfContent);
+            $text = $pdf->getText();
+
+            // Find the line that starts ne USD
+            $lines = explode("\n", $text);
+            $usdLine = collect($lines)->first(function ($line) {
+                return Str::startsWith(trim($line), 'USD');
+            });
+
+            if (!$usdLine) {
+                return response()->json(['error' => 'USD row not found in PDF'], 404);
+            }
+            
+            $cleanedLine = preg_replace('/\s+/', ' ', trim($usdLine));
+
+		   
+		         $columns = explode(' ', $cleanedLine);
+
+
+
+            if (count($columns) < 7) {
+                return response()->json(['error' => 'USD row does not contain enough columns'], 500);
+            }
+
+            return response()->json([
+                'currency' => $columns[0],
+                'indices' => '',
+                'bid' => $columns[1],
+                'ask' => $columns[2],
+                'mid_rate' => $columns[3],
+                'bid_zwg' => $columns[4],
+                'ask_zwg' => $columns[5],
+                'mid_rate_zwg' => $columns[6],
+                'source_url' => $pdfUrl,
+            ]);
+          } catch (\Exception $e) {
+              return response()->json(['error' => 'Failed to process PDF', 'details' => $e->getMessage()], 500);
+          }
+      }
+
+
+      public function fetchAllRates()
+      {
+          $date = Carbon::now();
+          $day = strtoupper($date->format('d'));
+          $month = Str::ucfirst($date->format('F'));
+          $year = $date->format('Y');
+          $month_upper = strtoupper($date->format('F'));
+  
+          $pdfUrl = "https://www.rbz.co.zw/documents/Exchange_Rates/{$year}/{$month}/RATES_{$day}_{$month_upper}_{$year}.pdf";
+  
+          try {
+              $context = stream_context_create([
+                  "ssl" => [
+                      "verify_peer" => false,
+                      "verify_peer_name" => false,
+                  ]
+              ]);
+  
+              $pdfContent = file_get_contents($pdfUrl, false, $context);
+  
+              if (!$pdfContent) {
+                  return response()->json(['error' => 'RBZ PDF not found'], 404);
+              }
+  
+              $parser = new Parser();
+              $pdf = $parser->parseContent($pdfContent);
+              $text = $pdf->getText();
+  
+              $lines = explode("\n", $text);
+              $rates = [];
+              $currencyPattern = '/^[A-Z]{2,3}(\/[A-Z]{3})?$/';
+  
+              foreach ($lines as $line) {
+                  $line = trim($line);
+                  if (empty($line)) {
+                      continue; 
+                  }
+  
+                  $cleanedLine = preg_replace('/\s+/', ' ', $line);
+                  $columns = explode(' ', $cleanedLine);
+  
+                  if (preg_match($currencyPattern, $columns[0])) {
+                      $indices = '';
+                      $offset = 1;
+                      
+                      if (isset($columns[1]) && $columns[1] === '*') {
+                          $indices = '*';
+                          $offset = 2;
+                      }
+  
+                      if (count($columns) >= ($offset + 6)) {
+                          $rates[] = [
+                              'currency' => $columns[0],
+                              'indices' => $indices,
+                              'bid' => $columns[$offset],
+                              'ask' => $columns[$offset + 1],
+                              'mid_rate' => $columns[$offset + 2],
+                              'bid_zwg' => $columns[$offset + 3],
+                              'ask_zwg' => $columns[$offset + 4],
+                              'mid_rate_zwg' => $columns[$offset + 5],
+                          ];
+                      }
+                  }
+              }
+  
+              if (empty($rates)) {
+                  return response()->json(['error' => 'No currency rates found in PDF'], 404);
+              }
+  
+              return response()->json([
+                  'date' => $date->format('Y-m-d'),
+                  'rates' => $rates,
+                  'source_url' => $pdfUrl,
+              ]);
+          } catch (\Exception $e) {
+              return response()->json(['error' => 'Failed to process PDF', 'details' => $e->getMessage()], 500);
+          }
+      }      
+      
+}
